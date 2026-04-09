@@ -1,5 +1,6 @@
 import streamlit as st
-from solver import valid_guesses, valid_answers, filter_possible_answers, best_guess, confidence_score, compute_constraints
+from solver import valid_guesses, valid_answers, filter_possible_answers, best_guess, compute_constraints
+from metrics import analyze_guess, format_confidence_explanation, get_best_guesses
 
 st.set_page_config(page_title="Wordle AI Solver", layout="wide")
 st.title("Wordle AI Solver 🟩🟨⬛")
@@ -107,24 +108,53 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                     st.write(f"Max counts: {dict(max_counts)}")
                     st.write(f"Excluded letters: {excluded}")
             else:
-                # Get AI suggestion
-                ai_guess, entropy = best_guess(possible, valid_guesses)
-                confidence = confidence_score(ai_guess, possible)
+                # Get top guesses - use possible answers as guess list (only suggests real answers)
+                top_guesses = get_best_guesses(possible, guess_list=possible, top_n=5)
+                
+                if top_guesses:
+                    ai_guess, best_analysis = top_guesses[0]
+                    
+                    # Display results
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        st.metric("🎯 AI Suggestion", ai_guess.upper())
+                    
+                    with col2:
+                        st.metric("📊 Remaining Answers", len(possible))
+                    
+                    with col3:
+                        entropy = best_analysis['entropy']
+                        st.metric("📈 Entropy Score", f"{entropy:.2f}")
 
-                # Display results
-                col1, col2, col3 = st.columns(3)
-                
-                with col1:
-                    st.metric("AI Suggestion", ai_guess.upper())
-                
-                with col2:
-                    st.metric("Remaining Answers", len(possible))
-                
-                with col3:
-                    confidence_pct = confidence * 100
-                    st.metric("Confidence", f"{confidence_pct:.1f}%")
-
-                st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
+                    st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
+                    
+                    # Show detailed explanation
+                    with st.expander("📚 Why This Guess?", expanded=True):
+                        explanation = format_confidence_explanation(best_analysis, len(possible))
+                        st.markdown(explanation)
+                        
+                        # Show pattern breakdown
+                        st.markdown("**Pattern Distribution:**")
+                        pattern_groups = best_analysis['pattern_groups']
+                        for pattern, count in sorted(pattern_groups.items(), key=lambda x: -x[1]):
+                            pct = (count / len(possible)) * 100
+                            bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
+                            st.text(f"  {pattern}: {count:2d} words [{bar}] {pct:5.1f}%")
+                    
+                    # Show alternative guesses
+                    if len(top_guesses) > 1:
+                        st.divider()
+                        st.markdown("### 🔄 Other Good Guesses")
+                        cols = st.columns(len(top_guesses) - 1)
+                        for idx, (alt_guess, alt_analysis) in enumerate(top_guesses[1:]):
+                            with cols[idx]:
+                                entropy = alt_analysis['entropy']
+                                is_answer = "✓" if alt_analysis['is_answer'] else ""
+                                st.metric(
+                                    f"{alt_guess.upper()} {is_answer}",
+                                    f"Entropy: {entropy:.2f}"
+                                )
                 
                 # Show some of the possible answers if there aren't too many
                 if len(possible) <= 20:
