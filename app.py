@@ -2,18 +2,18 @@ import streamlit as st
 from solver import valid_guesses, valid_answers, filter_possible_answers, best_guess, compute_constraints
 from metrics import analyze_guess, format_confidence_explanation, get_best_guesses
 
-st.set_page_config(page_title="Wordle AI Solver", layout="wide")
-st.title("Wordle AI Solver 🟩🟨⬛")
+st.set_page_config(page_title="Wordle Solver", layout="wide")
+st.title("Wordle Solver 🟩🟨⬛")
 
 st.markdown("""
 ### How to use:
-1. Enter your Wordle guess (e.g., "STARE")
-2. Enter the feedback you received:
+1. Enter your Wordle guess
+2. Enter the feedback you received (Pay attention to letter counts, if E appears twice with different colors, the constraints matter):
    - **G** = Green (correct position)
-   - **Y** = Yellow (wrong position)  
+   - **Y** = Yellow (wrong position, but still included in the word)  
    - **B** = Black (not in word)
 3. Repeat for each guess
-4. Click "Get AI Suggestion" to see the best next guess
+4. Click "Get AI Suggestion" to see the best next guess, plus an explanation for that guess!
 """)
 
 st.divider()
@@ -30,15 +30,15 @@ for i in range(6):
     
     with col_guess:
         guess = st.text_input(
-            f"Guess {i+1}",
+            f"Guess #{i+1}",
             key=f"guess_{i}",
             max_chars=5,
-            placeholder="e.g., STARE"
+            placeholder="e.g., CRANE"
         ).lower().strip()
     
     with col_feedback:
         feedback = st.text_input(
-            f"Feedback {i+1}",
+            f"Feedback #{i+1}",
             key=f"feedback_{i}",
             max_chars=5,
             placeholder="e.g., GBBBY"
@@ -47,23 +47,23 @@ for i in range(6):
     # Validate and add to history
     if guess and feedback:
         if len(guess) != 5:
-            st.error(f"❌ Guess {i+1}: Must be exactly 5 letters (got {len(guess)})")
+            st.error(f"❌ Guess #{i+1}: Must be exactly 5 letters (only input {len(guess)})")
             continue
         if len(feedback) != 5:
-            st.error(f"❌ Feedback {i+1}: Must be exactly 5 letters (got {len(feedback)})")
+            st.error(f"❌ Feedback #{i+1}: Must be exactly 5 letters (only input {len(feedback)})")
             continue
         if not all(c in "GYB" for c in feedback):
-            st.error(f"❌ Feedback {i+1}: Must only contain G, Y, or B")
+            st.error(f"❌ Feedback #{i+1}: Must only contain G, Y, or B")
             continue
         if guess not in valid_guesses:
-            st.warning(f"⚠️ Guess {i+1} '{guess.upper()}' not in valid guesses list (but continuing anyway)")
+            st.warning(f"⚠️ Guess #{i+1} '{guess.upper()}' not in Wordle's valid guesses list (but continuing anyway)")
         
         guess_history.append((guess, feedback))
 
 st.divider()
 
 # Button to get suggestion
-if st.button("🎯 Get AI Suggestion", use_container_width=True):
+if st.button("Get AI Suggestion", use_container_width=True):
     if not guess_history:
         st.warning("⚠️ Please enter at least one guess and its feedback.")
     else:
@@ -83,8 +83,7 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                 )
         
         if has_contradiction:
-            st.error("❌ **Contradictory Constraints Detected!**")
-            st.error("The feedback you entered is inconsistent:")
+            st.error("**Contradictory Constraints Detected!** The feedback you entered is inconsistent.")
             for msg in contradiction_letters:
                 st.error(f"  • {msg}")
             st.info("Please check your feedback entries and try again.")
@@ -93,19 +92,16 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
             possible = filter_possible_answers(valid_answers, guess_history)
 
             if not possible:
-                st.error("❌ **No possible answers remain.**")
-                st.info("This could mean:")
-                st.info("  • Your feedback entries have a typo")
-                st.info("  • The actual Wordle answer is not in the standard word list")
-                st.info("  • There's an inconsistency in your feedback")
+                st.error("**No possible answers remain.**")
+                st.info("This could mean the actual Wordle answer is not in the standard word list, your feedback entries have a typo, or there's an issue with your feedback.")
                 
                 # Show diagnostic info
-                with st.expander("🔍 Diagnostic Information"):
+                with st.expander("🔍 Constraint Details"):
                     st.write("**Constraints:**")
                     st.write(f"Green positions: {[f'{i}: {g}' for i, g in enumerate(green) if g]}")
                     st.write(f"Yellow letters: {dict(yellow)}")
-                    st.write(f"Min counts: {dict(min_counts)}")
-                    st.write(f"Max counts: {dict(max_counts)}")
+                    st.write(f"Minimum counts: {dict(min_counts)}")
+                    st.write(f"Maximum counts: {dict(max_counts)}")
                     st.write(f"Excluded letters: {excluded}")
             else:
                 # Get top guesses - use possible answers as guess list (only suggests real answers)
@@ -116,7 +112,6 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                     
                     # Display results
                     col1, col2, col3 = st.columns(3)
-                    
                     with col1:
                         st.metric("🎯 AI Suggestion", ai_guess.upper())
                     
@@ -124,8 +119,8 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                         st.metric("📊 Remaining Answers", len(possible))
                     
                     with col3:
-                        entropy = best_analysis['entropy']
-                        st.metric("📈 Entropy Score", f"{entropy:.2f}")
+                        confidence = best_analysis['confidence']
+                        st.metric("✅ Confidence", f"{confidence:.0%}")
 
                     st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
                     
@@ -145,15 +140,15 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                     # Show alternative guesses
                     if len(top_guesses) > 1:
                         st.divider()
-                        st.markdown("### 🔄 Other Good Guesses")
+                        st.markdown("### 💡 Other Good Guesses")
                         cols = st.columns(len(top_guesses) - 1)
                         for idx, (alt_guess, alt_analysis) in enumerate(top_guesses[1:]):
                             with cols[idx]:
-                                entropy = alt_analysis['entropy']
-                                is_answer = "✓" if alt_analysis['is_answer'] else ""
+                                confidence = alt_analysis['confidence']
+                                is_answer = "" if alt_analysis['is_answer'] else ""
                                 st.metric(
                                     f"{alt_guess.upper()} {is_answer}",
-                                    f"Entropy: {entropy:.2f}"
+                                    f"{confidence:.0%}"
                                 )
                 
                 # Show some of the possible answers if there aren't too many
@@ -170,28 +165,28 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.write("**Green Positions (Exact Matches):**")
+                        st.write("**Green Positions:**")
                         green_info = {i: g for i, g in enumerate(green) if g}
                         if green_info:
                             for pos, letter in green_info.items():
-                                st.write(f"  Position {pos}: **{letter.upper()}**")
+                                st.write(f"  Position {pos + 1}: **{letter.upper()}**")
                         else:
-                            st.write("  (none yet)")
+                            st.write("  None yet")
                         
                         st.write("\n**Excluded Letters:**")
                         if excluded:
                             st.write(f"  {', '.join(sorted(excluded)).upper()}")
                         else:
-                            st.write("  (none yet)")
+                            st.write("  None yet")
                     
                     with col2:
-                        st.write("**Yellow Letters (Wrong Position):**")
+                        st.write("**Yellow Letters:**")
                         if yellow:
                             for letter, bad_positions in sorted(yellow.items()):
                                 pos_str = ", ".join(str(p) for p in sorted(bad_positions))
-                                st.write(f"  **{letter.upper()}** can't be at position {pos_str}")
+                                st.write(f"  **{letter.upper()}** can't be at position {pos_str + 1}")
                         else:
-                            st.write("  (none yet)")
+                            st.write("  None yet")
                         
                         st.write("\n**Letter Count Constraints:**")
                         if min_counts or max_counts:
@@ -203,20 +198,12 @@ if st.button("🎯 Get AI Suggestion", use_container_width=True):
                                 else:
                                     st.write(f"  **{letter.upper()}**: {min_c}-{max_c} times")
                         else:
-                            st.write("  (none yet)")
+                            st.write("  None yet")
 
 st.divider()
 
 # Footer with instructions
 st.markdown("""
 ---
-### 💡 Tips for using the Wordle solver:
-- **Start with common words** like STARE, SLATE, or RAISE
-- **The AI suggests guesses** that maximize information gain
-- **Green letters** are locked in place
-- **Yellow letters** must appear but in different positions
-- **Black letters** won't appear in the final answer
-- Pay attention to **letter counts** - if E appears twice with different colors, the constraints matter!
-
-Made with ❤️ using Streamlit
+Created by Caroline Wales, Zach Swartz, and Cole Barclay
 """)
