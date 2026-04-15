@@ -1,7 +1,26 @@
 import streamlit as st
-from solver import valid_guesses, valid_answers, filter_possible_answers, best_guess, compute_constraints
-from metrics import analyze_guess, format_confidence_explanation, get_best_guesses
+import joblib
+from solver import (
+    valid_guesses,
+    valid_answers,
+    filter_possible_answers,
+    compute_constraints,
+)
+from solver import (
+    analyze_guess,
+    get_best_guesses,
+)
+from mlFeatures import extract_features
 
+# Load ML model (trained offline)
+try:
+    ml_model = joblib.load("guess_ranker.pkl")
+    ML_AVAILABLE = True
+except Exception:
+    ml_model = None
+    ML_AVAILABLE = False
+
+# Streamlit UI setup
 st.set_page_config(page_title="Wordle Solver", layout="wide")
 st.title("Wordle Solver 🟩🟨⬛")
 
@@ -13,12 +32,12 @@ st.markdown("""
    - **Y** = Yellow (wrong position, but still included in the word)  
    - **B** = Black (not in word)
 3. Repeat for each guess
-4. Click "Get AI Suggestion" to see the best next guess, plus an explanation for that guess!
+4. Click "Get AI Suggestion" to see the best next guess, plus an AI-powered explanation!
 """)
 
 st.divider()
 
-# Input multiple guesses
+# Guess input
 guess_history = []
 col1, col2 = st.columns(2)
 
@@ -62,7 +81,7 @@ for i in range(6):
 
 st.divider()
 
-# Button to get suggestion
+# Solver button
 if st.button("Get AI Suggestion", use_container_width=True):
     if not guess_history:
         st.warning("⚠️ Please enter at least one guess and its feedback.")
@@ -104,53 +123,36 @@ if st.button("Get AI Suggestion", use_container_width=True):
                     st.write(f"Maximum counts: {dict(max_counts)}")
                     st.write(f"Excluded letters: {excluded}")
             else:
-                # Get top guesses - use possible answers as guess list (only suggests real answers)
-                top_guesses = get_best_guesses(possible, guess_list=possible, top_n=5)
-                
-                if top_guesses:
-                    ai_guess, best_analysis = top_guesses[0]
-                    
-                    # Display results
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("🎯 AI Suggestion", ai_guess.upper())
-                    
-                    with col2:
-                        st.metric("📊 Remaining Answers", len(possible))
-                    
-                    with col3:
-                        confidence = best_analysis['confidence']
-                        st.metric("✅ Confidence", f"{confidence:.0%}")
 
-                    st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
-                    
-                    # Show detailed explanation
-                    with st.expander("📚 Why This Guess?", expanded=True):
-                        explanation = format_confidence_explanation(best_analysis, len(possible))
-                        st.markdown(explanation)
-                        
-                        # Show pattern breakdown
-                        st.markdown("**Pattern Distribution:**")
-                        pattern_groups = best_analysis['pattern_groups']
-                        for pattern, count in sorted(pattern_groups.items(), key=lambda x: -x[1]):
-                            pct = (count / len(possible)) * 100
-                            bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
-                            st.text(f"  {pattern}: {count:2d} words [{bar}] {pct:5.1f}%")
-                    
-                    # Show alternative guesses
-                    if len(top_guesses) > 1:
-                        st.divider()
-                        st.markdown("### 💡 Other Good Guesses")
-                        cols = st.columns(len(top_guesses) - 1)
-                        for idx, (alt_guess, alt_analysis) in enumerate(top_guesses[1:]):
-                            with cols[idx]:
-                                confidence = alt_analysis['confidence']
-                                is_answer = "" if alt_analysis['is_answer'] else ""
-                                st.metric(
-                                    f"{alt_guess.upper()} {is_answer}",
-                                    f"{confidence:.0%}"
-                                )
+                if ML_AVAILABLE:
+                    scored = []
+                    for guess in possible:
+                        features = extract_features(guess, possible)
+                        score = ml_model.predict([features])[0]
+                        scored.append((guess, score))
+
+                    scored.sort(key=lambda x: x[1], reverse=True)
+                    ai_guess = scored[0][0]
+                else:
+                    # Fallback to rule-based solver
+                    ai_guess, _ = get_best_guesses(possible, top_n=1)[0]
+
+                # Analyze guess
+                analysis = analyze_guess(ai_guess, possible)
+
+                # Display results
+                # Keep ML's top ranked guesses for later display
+                top_ranked = scored[:5] if ML_AVAILABLE else [(ai_guess, 0)]
+                col1, col2, col3 = st.columns(3)
                 
+                with col1:
+                    st.metric("🎯 AI Suggestion", ai_guess.upper())
+                    
+                with col2:
+                    st.metric("📊 Remaining Answers", len(possible))
+
+                st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
+                                
                 # Show some of the possible answers if there aren't too many
                 if len(possible) <= 20:
                     with st.expander(f"📋 All {len(possible)} Possible Answers"):
@@ -183,8 +185,8 @@ if st.button("Get AI Suggestion", use_container_width=True):
                         st.write("**Yellow Letters:**")
                         if yellow:
                             for letter, bad_positions in sorted(yellow.items()):
-                                pos_str = ", ".join(str(p) for p in sorted(bad_positions))
-                                st.write(f"  **{letter.upper()}** can't be at position {pos_str + 1}")
+                                pos_str = ", ".join(str(p + 1) for p in sorted(bad_positions))
+                                st.write(f"  **{letter.upper()}** can't be at position {pos_str}")
                         else:
                             st.write("  None yet")
                         
