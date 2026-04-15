@@ -1,27 +1,52 @@
+"""
+Wordle Solver - Core Logic
+
+This module contains all the constraint logic and analysis needed for the Wordle solver.
+It handles:
+- Loading valid words
+- Computing constraints from guess feedback
+- Filtering possible answers
+- Analyzing and scoring guesses
+"""
+
 from collections import defaultdict, Counter
 import math
+
+
+# ==========================================
+# WORD LOADING
+# ==========================================
 
 def load_words(filepath):
     """Load 5-letter words from a file"""
     with open(filepath, "r") as f:
         return [line.strip().lower() for line in f if len(line.strip()) == 5]
 
-valid_guesses = load_words("valid-wordle-guesses.txt")
-valid_answers = load_words("valid-wordle-answers.txt")
 
-print(f"Loaded {len(valid_guesses)} guesses and {len(valid_answers)} answers.")
+try:
+    valid_guesses = load_words("valid-wordle-guesses.txt")
+    valid_answers = load_words("valid-wordle-answers.txt")
+    print(f"Loaded {len(valid_guesses)} guesses and {len(valid_answers)} answers.")
+except FileNotFoundError as e:
+    print(f"Warning: Could not load word lists: {e}")
+    valid_guesses = []
+    valid_answers = []
 
 
-# -------------------------------
-# FIXED: Robust constraint solver
-# -------------------------------
+# ==========================================
+# CONSTRAINT COMPUTATION
+# ==========================================
 
 def compute_constraints(guess_history):
     """
-    Fixed constraint computation that properly handles:
-    1. Letters that appear in multiple guesses
-    2. Mixed feedback (green + yellow + black for same letter)
-    3. Contradictory constraints
+    Compute all constraints based on guess history.
+    
+    Args:
+        guess_history: List of tuples (guess, feedback) where feedback is a 5-char string
+                      with G (green), Y (yellow), or B (black) for each letter
+    
+    Returns:
+        Tuple of (green_positions, yellow_positions, min_counts, max_counts, excluded_letters)
     """
     green_positions = [None] * 5          # letters in exact positions
     yellow_positions = defaultdict(set)   # letter -> indices it cannot be
@@ -43,8 +68,6 @@ def compute_constraints(guess_history):
         
         # Now update min_counts based on green/yellow feedback
         for letter, gy_count in green_yellow_count.items():
-            # A letter marked as yellow or green must appear at least gy_count times
-            # (since each marking corresponds to one instance of the letter)
             min_counts[letter] = max(min_counts[letter], gy_count)
         
         # Now handle black letters
@@ -54,15 +77,10 @@ def compute_constraints(guess_history):
                 
                 if gy_count == 0:
                     # This letter doesn't appear as green/yellow in this guess
-                    # It might appear in previous guesses, so we need to check
-                    # If it's purely black here with no green/yellow history,
-                    # then max_counts[letter] should be 0
                     if min_counts[letter] == 0:
                         # Never seen this letter as green/yellow
                         max_counts[letter] = 0
                         excluded_letters.add(letter)
-                    # else: letter was green/yellow in a previous guess,
-                    # so max_counts already set correctly
                 else:
                     # This letter appears green/yellow elsewhere in this guess
                     # So the max count is exactly the green/yellow count
@@ -124,9 +142,9 @@ def filter_possible_answers(possible_words, guess_history):
     return [w for w in possible_words if word_matches(w, green, yellow, min_counts, max_counts, excluded)]
 
 
-# -------------------------------
-# Guess scoring (entropy)
-# -------------------------------
+# ==========================================
+# FEEDBACK GENERATION
+# ==========================================
 
 def generate_feedback(guess, answer):
     """
@@ -160,6 +178,10 @@ def generate_feedback(guess, answer):
     return "".join(feedback)
 
 
+# ==========================================
+# GUESS ANALYSIS (for backward compatibility)
+# ==========================================
+
 def score_guess(guess, possible_answers):
     """
     Calculate entropy of a guess.
@@ -188,11 +210,8 @@ def confidence_score(guess, possible_answers):
     """
     Calculate confidence score for a guess (0 to 1).
     
-    Higher score = more likely to narrow down the answer significantly
-    
-    Score is based on: how many words would be eliminated in the worst case?
-    Perfect score (1.0) = any outcome eliminates all but one word
-    Worst score (0.0) = no progress made
+    This measures how many answers are eliminated on average.
+    A high confidence means this guess will significantly narrow down the possibilities.
     """
     if len(possible_answers) == 0:
         return 0.0
@@ -217,6 +236,85 @@ def confidence_score(guess, possible_answers):
     confidence = 1.0 - (expected_remaining / total)
     
     return confidence
+
+
+def analyze_guess(guess, possible_answers):
+    """
+    Analyze a guess in detail, returning multiple metrics.
+
+    Returns:
+        dict with keys: entropy, confidence, elimination_rate, best_case,
+        worst_case, expected_remaining, is_answer, pattern_groups
+    """
+    if len(possible_answers) == 0:
+        return None
+
+    pattern_groups = defaultdict(int)
+    for answer in possible_answers:
+        pattern = generate_feedback(guess, answer)
+        pattern_groups[pattern] += 1
+
+    total = len(possible_answers)
+
+    entropy = 0.0
+    for count in pattern_groups.values():
+        if count > 0:
+            probability = count / total
+            entropy -= probability * math.log2(probability)
+
+    if total == 1:
+        conf = 1.0
+    else:
+        expected_remaining = sum(
+            (count / total) * count for count in pattern_groups.values()
+        ) / total
+        conf = 1.0 - (expected_remaining / total)
+
+    best_case = min(pattern_groups.values())
+    worst_case = max(pattern_groups.values())
+    expected_remaining = sum(
+        (count / total) * count for count in pattern_groups.values()
+    ) / total
+    elimination_rate = 1.0 - (expected_remaining / total)
+
+    return {
+        'entropy': entropy,
+        'confidence': conf,
+        'elimination_rate': elimination_rate,
+        'best_case': best_case,
+        'worst_case': worst_case,
+        'expected_remaining': expected_remaining,
+        'is_answer': guess in possible_answers,
+        'pattern_groups': dict(pattern_groups),
+    }
+
+
+def get_best_guesses(possible_answers, guess_list=None, top_n=5):
+    """
+    Find the best guesses sorted by confidence (highest first).
+
+    Args:
+        possible_answers: List of possible remaining answers
+        guess_list: List of guesses to consider. Defaults to possible_answers.
+        top_n: Return top N guesses
+
+    Returns:
+        List of tuples: (guess, analysis_dict)
+    """
+    if not possible_answers:
+        return []
+
+    if guess_list is None:
+        guess_list = possible_answers
+
+    scored_guesses = []
+    for guess in guess_list:
+        analysis = analyze_guess(guess, possible_answers)
+        if analysis:
+            scored_guesses.append((guess, analysis))
+
+    scored_guesses.sort(key=lambda x: x[1]['confidence'], reverse=True)
+    return scored_guesses[:top_n]
 
 
 def best_guess(possible_answers, all_guesses):
