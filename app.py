@@ -32,7 +32,7 @@ st.markdown("""
    - **Y** = Yellow (wrong position, but still included in the word)  
    - **B** = Black (not in word)
 3. Repeat for each guess
-4. Click "Get AI Suggestion" to see the best next guess, plus an AI-powered explanation!
+4. Click "Get AI Suggestion" to see the best next best guess from a trained model!
 """)
 
 st.divider()
