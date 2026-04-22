@@ -13,14 +13,20 @@ The ML model is a Random Forest trained to predict elimination_rate (the fractio
 
 # Project Structure
 .
-app.py                      # Streamlit UI
 
-solver.py                   # Core logic, takes care of constraints and filtering
-mlFeatures.py               # Feature extraction for the ML model
-train_guess_ranker.py       # Script to (re)train the ML model
-guess_ranker.pkl            # Pre-trained Random Forest model
-valid-wordle-guesses.txt    # All valid 5-letter Wordle guesses
-valid-wordle-answers.txt    # All valid Wordle answers
+├── app.py                      # Streamlit UI
+
+├── solver.py                   # Core logic, takes care of constraints and filtering
+
+├── mlFeatures.py               # Feature extraction for the ML model
+
+├── train_guess_ranker.py       # Script to (re)train the ML model
+
+├── guess_ranker.pkl            # Pre-trained Random Forest model
+
+├── valid-wordle-guesses.txt    # All valid 5-letter Wordle guesses
+
+└── valid-wordle-answers.txt    # All valid Wordle answers
 
 # Setup
 1. Requires Python 3.8+
