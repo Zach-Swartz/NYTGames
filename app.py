@@ -125,14 +125,74 @@ if st.button("Get AI Suggestion", use_container_width=True):
             else:
 
                 if ML_AVAILABLE:
+                    # scored = []
+                    # for guess in possible:
+                    #     features = extract_features(guess, possible)
+                    #     score = ml_model.predict([features])[0]
+                    #     scored.append((guess, score))
+
+                    # scored.sort(key=lambda x: x[1], reverse=True)
+                    # ai_guess = scored[0][0]
                     scored = []
                     for guess in possible:
                         features = extract_features(guess, possible)
-                        score = ml_model.predict([features])[0]
-                        scored.append((guess, score))
+                        ml_score = ml_model.predict([features])[0]
+                        scored.append((guess, ml_score))
 
                     scored.sort(key=lambda x: x[1], reverse=True)
                     ai_guess = scored[0][0]
+
+                    # Build a richer score using factors that actually differ between candidates
+                    import numpy as np
+                    from collections import Counter
+
+                    # Letter frequency across ALL valid answers (not just remaining)
+                    all_letter_freq = Counter()
+                    for word in valid_answers:
+                        for c in word:
+                            all_letter_freq[c] += 1
+                    total_letters = sum(all_letter_freq.values())
+                    for k in all_letter_freq:
+                        all_letter_freq[k] /= total_letters
+
+                    # Position frequency across remaining answers
+                    position_freq = [Counter() for _ in range(5)]
+                    for word in possible:
+                        for i, c in enumerate(word):
+                            position_freq[i][c] += 1
+
+                    combined_scores = []
+                    for word, ml_score in scored:
+                        # How common are this word's letters globally
+                        letter_score = sum(all_letter_freq.get(c, 0) for c in set(word))
+
+                        # How well do its letters match position patterns in remaining words
+                        position_score = sum(
+                            position_freq[i].get(c, 0) / len(possible)
+                            for i, c in enumerate(word)
+                        )
+
+                        # Penalize duplicate letters (less information)
+                        unique_bonus = len(set(word)) / 5.0
+
+                        # Combine: ml_score anchors it, others differentiate
+                        final_score = (
+                            ml_score * 0.4 +
+                            letter_score * 0.2 +
+                            position_score * 0.3 +
+                            unique_bonus * 0.1
+                        )
+                        combined_scores.append((word, final_score))
+
+                    combined_scores.sort(key=lambda x: x[1], reverse=True)
+                    ai_guess = combined_scores[0][0]
+
+                    raw = np.array([s for _, s in combined_scores])
+                    shifted = raw - raw.max()
+                    exp_scores = np.exp(shifted / 0.05)  # low temp = decisive
+                    probabilities = exp_scores / exp_scores.sum()
+                    prob_map = {word: float(prob) for (word, _), prob in zip(combined_scores, probabilities)}
+                    top_ranked = sorted(combined_scores[:5], key=lambda x: prob_map.get(x[0], 0), reverse=True)
                 else:
                     # Fallback to rule-based solver
                     ai_guess, _ = get_best_guesses(possible, top_n=1)[0]
@@ -142,16 +202,42 @@ if st.button("Get AI Suggestion", use_container_width=True):
 
                 # Display results
                 # Keep ML's top ranked guesses for later display
-                top_ranked = scored[:5] if ML_AVAILABLE else [(ai_guess, 0)]
+
+                # # Display results
+                # top_ranked = scored[:5] if ML_AVAILABLE else [(ai_guess, 0)]
+
                 col1, col2, col3 = st.columns(3)
-                
                 with col1:
                     st.metric("🎯 AI Suggestion", ai_guess.upper())
-                    
                 with col2:
                     st.metric("📊 Remaining Answers", len(possible))
+                with col3:
+                    top_prob = prob_map.get(ai_guess, 0)
+                    st.metric("🤖 Answer Probability", f"{top_prob:.1%}")
 
                 st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
+
+                st.subheader("📈 Candidate Probabilities (AI-ranked)")
+                for word, _ in top_ranked:
+                    prob = prob_map.get(word, 0)
+                    col_w, col_b, col_p = st.columns([1, 4, 1])
+                    with col_w:
+                        st.code(word.upper())
+                    with col_b:
+                        st.progress(prob)
+                    with col_p:
+                        st.write(f"{prob:.1%}")
+
+                # top_ranked = scored[:5] if ML_AVAILABLE else [(ai_guess, 0)]
+                # col1, col2, col3 = st.columns(3)
+                
+                # with col1:
+                #     st.metric("🎯 AI Suggestion", ai_guess.upper())
+                    
+                # with col2:
+                #     st.metric("📊 Remaining Answers", len(possible))
+
+                # st.success(f"✅ Try guessing **{ai_guess.upper()}** next!")
                                 
                 # Show some of the possible answers if there aren't too many
                 if len(possible) <= 20:
