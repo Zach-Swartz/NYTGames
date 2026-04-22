@@ -14,6 +14,7 @@ The ML model is a Random Forest trained to predict elimination_rate (the fractio
 # Project Structure
 .
 app.py                      # Streamlit UI
+
 solver.py                   # Core logic, takes care of constraints and filtering
 mlFeatures.py               # Feature extraction for the ML model
 train_guess_ranker.py       # Script to (re)train the ML model
